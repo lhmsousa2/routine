@@ -10,8 +10,9 @@ Web apps on iPhone can't schedule their own notifications, so we use the built-i
 4. Choose **Run Immediately** (not "Run After Confirmation"). Turn **off** "Notify When Run".
 5. Tap **Next** → **New Blank Automation** → **Add Action**.
 6. Search for **Show Notification**, add it, and type the message.
-7. *(Optional)* Add a second action: **Open App**… won't work for web apps, so instead add **Open URLs** with your app's address. Tapping the notification then opens the app.
-8. Tap **Done**.
+7. Tap **Done**.
+
+> Don't add an "Open URLs" action: it opens the app in Safari, which has separate (empty) storage from your home-screen app. Just open the app from its icon.
 
 ## Suggested schedule
 
