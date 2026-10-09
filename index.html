@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Routine</title>
+  <meta name="theme-color" content="#f6f3ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#141311" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Routine">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <div class="topbar-date" id="topbar-date"></div>
+      <h1 id="topbar-title">Today</h1>
+    </div>
+    <div class="coin-pill" id="balance" aria-label="Coin balance"></div>
+  </header>
+
+  <main>
+    <section id="view-today" class="view"></section>
+    <section id="view-history" class="view" hidden></section>
+    <section id="view-goals" class="view" hidden></section>
+    <section id="view-settings" class="view" hidden></section>
+  </main>
+
+  <nav class="tabbar" aria-label="Sections">
+    <button data-tab="today" class="active"><span class="tab-icon">✓</span>Today</button>
+    <button data-tab="history"><span class="tab-icon">▦</span>History</button>
+    <button data-tab="goals"><span class="tab-icon">☰</span>Goals</button>
+    <button data-tab="settings"><span class="tab-icon">⚙</span>Settings</button>
+  </nav>
+
+  <dialog id="goal-dialog">
+    <form id="goal-form" method="dialog">
+      <h2 id="goal-dialog-title">New goal</h2>
+      <p class="hint" id="goal-dialog-hint"></p>
+      <label>Name
+        <input name="name" required maxlength="60" placeholder="e.g. Push-ups" autocomplete="off">
+      </label>
+      <div class="row2">
+        <label>Target <span class="opt">optional</span>
+          <input name="target" type="number" inputmode="decimal" min="0" step="any" placeholder="50">
+        </label>
+        <label>Unit
+          <input name="unit" maxlength="12" placeholder="reps, min, L" autocomplete="off">
+        </label>
+      </div>
+      <label>Carry-over if missed <span class="opt">optional · needs a target</span>
+        <input name="carryOverExtra" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 25 → tomorrow is 75">
+      </label>
+      <label>Must be done by <span class="opt">optional · locks after this time</span>
+        <input name="deadline" type="time">
+      </label>
+      <div class="dialog-actions">
+        <button type="button" class="btn danger" id="goal-remove" hidden>Remove</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" id="goal-cancel">Cancel</button>
+        <button type="submit" class="btn primary" id="goal-save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
