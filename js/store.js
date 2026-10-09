@@ -1,20 +1,33 @@
 // Persistence: localStorage on the device, plus JSON backup export/import.
-import { newState, validateState } from './engine.js';
+import { newState, validateState, migrate } from './engine.js';
 
-const KEY = 'routine.state.v1';
+// Debug mode (?debug) uses its own key so time-travel testing never touches real data.
+const KEY = new URLSearchParams(location.search).has('debug') ? 'routine.state.debug' : 'routine.state.v1';
 
+// Returns { state, recovered } — recovered is true if unreadable data was found and set aside.
 export function load(now) {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) {
-      const s = JSON.parse(raw);
-      if (validateState(s)) return s;
-      console.warn('Stored state invalid; starting fresh');
-    }
+    raw = localStorage.getItem(KEY);
   } catch (e) {
     console.error('Could not read saved data', e);
   }
-  return newState(now);
+  if (raw) {
+    try {
+      const s = migrate(JSON.parse(raw));
+      if (validateState(s)) return { state: s, recovered: false };
+    } catch {
+      /* fall through */
+    }
+    // Never silently overwrite data we couldn't read: keep the raw copy aside.
+    try {
+      localStorage.setItem(`${KEY}.unreadable.${Date.now()}`, raw);
+    } catch {
+      /* storage full: nothing more we can do */
+    }
+    return { state: newState(now), recovered: true };
+  }
+  return { state: newState(now), recovered: false };
 }
 
 export function save(state) {
@@ -24,6 +37,15 @@ export function save(state) {
   } catch (e) {
     console.error('Could not save', e);
     return false;
+  }
+}
+
+// Keep a copy of the current data before it gets replaced (import, erase).
+export function keepSafetyCopy(state, label) {
+  try {
+    localStorage.setItem(`${KEY}.before-${label}`, JSON.stringify(state));
+  } catch {
+    /* best effort */
   }
 }
 
@@ -47,8 +69,10 @@ export async function exportBackup(state, dateLabel) {
       return 'shared';
     } catch (e) {
       if (e.name === 'AbortError') return 'cancelled';
+      throw new Error('Could not open the share sheet. Try again.');
     }
   }
+  // Desktop browsers: plain download.
   const url = URL.createObjectURL(blob);
   const a = Object.assign(document.createElement('a'), { href: url, download: name });
   document.body.append(a);
@@ -62,10 +86,10 @@ export async function readBackup(file) {
   const text = await file.text();
   let s;
   try {
-    s = JSON.parse(text);
+    s = migrate(JSON.parse(text));
   } catch {
     throw new Error('That file is not a valid backup (not JSON).');
   }
-  if (!validateState(s)) throw new Error('That file is not a routine backup, or it is from an incompatible version.');
+  if (!validateState(s)) throw new Error('That file is not a routine backup, or it is damaged.');
   return s;
 }

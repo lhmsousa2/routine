@@ -18,7 +18,9 @@ const now = () => new Date(Date.now() + debugOffset());
 
 // ---------- state ----------
 
-let state = Store.load(now());
+const loaded = Store.load(now());
+let state = loaded.state;
+let recovered = loaded.recovered; // saved data was unreadable and set aside
 let tab = 'today';
 let historyMonth = E.dateStr(now()).slice(0, 7); // 'YYYY-MM'
 let historySelected = null;
@@ -34,7 +36,7 @@ function settleAndRender() {
   const settled = E.settle(state, now());
   lastToday = E.dateStr(now());
   if (settled.length) {
-    Store.save(state);
+    if (!Store.save(state)) toast('⚠️ Could not save. Export a backup from Settings.');
     const results = settled.map((d) => state.history[d]).filter(Boolean);
     if (results.length) {
       const net = results.reduce((s, r) => s + r.net, 0);
@@ -43,6 +45,15 @@ function settleAndRender() {
     }
   }
   render();
+}
+
+// If midnight passed while the app was open, settle first and abort the action.
+function rolledOver() {
+  if (E.dateStr(now()) === lastToday) return false;
+  if (dialog.open) dialog.close();
+  settleAndRender();
+  toast('A new day started. Check again.');
+  return true;
 }
 
 // ---------- helpers ----------
@@ -64,6 +75,12 @@ function goalMeta(g, target = g.target, carried = false) {
   if (target != null) parts.push(`${fmtNum(target)}${g.unit ? ' ' + esc(g.unit) : ''}`);
   if (carried) parts.push(`<span class="badge warn">+${fmtNum(g.carryOverExtra)} carried over</span>`);
   return parts.join(' ');
+}
+
+function recoveredBanner() {
+  return recovered
+    ? `<div class="banner bad">Your saved data couldn't be read, so the app started fresh. A copy was kept on this phone. If you have a backup, import it in Settings.</div>`
+    : '';
 }
 
 let toastTimer;
@@ -99,6 +116,7 @@ function renderToday(n) {
   if (goals.length === 0) {
     const upcoming = E.activeGoals(state, E.addDays(today, 1)).length;
     el.innerHTML = `
+      ${recoveredBanner()}
       <div class="empty">
         <div class="empty-icon">🌱</div>
         <h2>${upcoming ? 'Your goals start tomorrow' : 'No goals yet'}</h2>
@@ -111,6 +129,8 @@ function renderToday(n) {
   const pct = Math.round((sum.doneCount / sum.total) * 100);
   const allDone = sum.doneCount === sum.total;
   el.innerHTML = `
+    ${recoveredBanner()}
+    ${E.isDayClosed(state, n) ? `<div class="banner bad">This day was already closed (the phone's clock or time zone moved back). Goals reopen tomorrow.</div>` : ''}
     ${E.isSetupMode(state) ? `<div class="banner"><strong>Practice day.</strong> Set up your goals: changes apply right away and misses cost nothing today. Scoring starts tomorrow.</div>` : ''}
     <div class="card stats ${allDone ? 'perfect' : ''}">
       <div class="stats-top">
@@ -138,18 +158,18 @@ function renderToday(n) {
           const { target, carried } = E.targetFor(state, g, today);
           const deadline = g.deadline
             ? locked
-              ? `<span class="badge ${done ? 'ok' : 'bad'}">${done ? 'Done in time' : `Missed · locked ${g.deadline}`}</span>`
-              : `<span class="badge">by ${g.deadline}</span>`
+              ? `<span class="badge ${done ? 'ok' : 'bad'}">${done ? 'Done in time' : `Missed · locked ${esc(g.deadline)}`}</span>`
+              : `<span class="badge">by ${esc(g.deadline)}</span>`
             : '';
           return `
           <li>
-            <button class="goal ${done ? 'done' : ''} ${locked ? 'locked' : ''}" data-action="toggle" data-id="${g.id}" ${locked ? 'aria-disabled="true"' : ''}>
+            <button class="goal ${done ? 'done' : ''} ${locked ? 'locked' : ''}" data-action="toggle" data-id="${esc(g.id)}" ${locked ? 'aria-disabled="true"' : ''}>
               <span class="check" aria-hidden="true">${done ? '✓' : locked ? '✕' : ''}</span>
               <span class="goal-body">
                 <span class="goal-name">${esc(g.name)}</span>
                 <span class="goal-meta">${goalMeta(g, target, carried)} ${deadline}</span>
               </span>
-              <span class="goal-coins">${done ? `+${fmtNum(E.REWARD * sum.multiplier)}` : sum.practice ? '' : `−${E.PENALTY}`}</span>
+              <span class="goal-coins">${done ? `+${E.REWARD}` : sum.practice ? '' : `−${E.PENALTY}`}</span>
             </button>
           </li>`;
         })
@@ -243,15 +263,15 @@ function renderGoals(n) {
           .map(({ gid, goal, status }) => {
             const extra = [];
             if (goal.carryOverExtra) extra.push(`carry-over +${fmtNum(goal.carryOverExtra)}`);
-            if (goal.deadline) extra.push(`by ${goal.deadline}`);
+            if (goal.deadline) extra.push(`by ${esc(goal.deadline)}`);
             return `
             <li class="goal-row ${status === 'ends-today' ? 'ending' : ''}">
-              <button class="goal-row-main" data-action="edit" data-gid="${gid}" ${status === 'ends-today' ? 'disabled' : ''}>
+              <button class="goal-row-main" data-action="edit" data-gid="${esc(gid)}" ${status === 'ends-today' ? 'disabled' : ''}>
                 <span class="goal-name">${esc(goal.name)}</span>
                 <span class="goal-meta">${[goalMeta(goal), ...extra].filter(Boolean).join(' · ')}</span>
                 ${STATUS_LABEL[status]}
               </button>
-              ${status === 'ends-today' ? `<button class="btn ghost small" data-action="restore" data-gid="${gid}">Undo</button>` : ''}
+              ${status === 'ends-today' ? `<button class="btn ghost small" data-action="restore" data-gid="${esc(gid)}">Undo</button>` : ''}
             </li>`;
           })
           .join('') || '<li class="muted pad">No goals yet.</li>'
@@ -324,6 +344,7 @@ function openGoalDialog(gid = null) {
 
 form.addEventListener('submit', (ev) => {
   ev.preventDefault();
+  if (rolledOver()) return;
   const fields = Object.fromEntries(new FormData(form));
   const res = editingGid ? E.editGoal(state, editingGid, fields, now()) : E.addGoal(state, fields, now());
   if (!res.ok) return toast(res.reason);
@@ -333,9 +354,11 @@ form.addEventListener('submit', (ev) => {
 });
 $('#goal-cancel').addEventListener('click', () => dialog.close());
 $('#goal-remove').addEventListener('click', () => {
+  if (rolledOver()) return;
   const g = E.latestVersion(state, editingGid);
   const setup = E.isSetupMode(state);
   if (!confirm(setup ? `Remove "${g.name}"?` : `Remove "${g.name}" from tomorrow? It still counts today.`)) return;
+  if (rolledOver()) return;
   E.removeGoal(state, editingGid, now());
   dialog.close();
   commit();
@@ -359,9 +382,9 @@ document.querySelector('main').addEventListener('click', async (ev) => {
   const b = ev.target.closest('[data-action]');
   if (!b) return;
   const a = b.dataset.action;
+  if (['toggle', 'add', 'edit', 'restore', 'import'].includes(a) && rolledOver()) return;
 
   if (a === 'toggle') {
-    if (E.dateStr(now()) !== lastToday) return settleAndRender(); // midnight passed while open
     const wasAllDone = E.todaySummary(state, now());
     const res = E.toggleDone(state, b.dataset.id, now());
     if (!res.ok) return toast(res.reason);
@@ -374,7 +397,8 @@ document.querySelector('main').addEventListener('click', async (ev) => {
   } else if (a === 'add') openGoalDialog();
   else if (a === 'edit') openGoalDialog(b.dataset.gid);
   else if (a === 'restore') {
-    E.restoreGoal(state, b.dataset.gid, now());
+    const res = E.restoreGoal(state, b.dataset.gid, now());
+    if (!res.ok) return toast(res.reason);
     commit();
   } else if (a === 'month') {
     const [y, m] = historyMonth.split('-').map(Number);
@@ -385,12 +409,18 @@ document.querySelector('main').addEventListener('click', async (ev) => {
     historySelected = historySelected === b.dataset.date ? null : b.dataset.date;
     render();
   } else if (a === 'export') {
-    const r = await Store.exportBackup(state, E.dateStr(now()));
-    if (r !== 'cancelled') toast('Backup exported');
+    try {
+      const r = await Store.exportBackup(state, E.dateStr(now()));
+      if (r !== 'cancelled') toast('Backup exported');
+    } catch (e) {
+      toast(e.message);
+    }
   } else if (a === 'reset') {
     const answer = prompt('This erases all goals, history and coins. Type ERASE to confirm.');
     if (answer?.trim().toUpperCase() !== 'ERASE') return;
+    Store.keepSafetyCopy(state, 'erase');
     state = E.newState(now());
+    recovered = false;
     commit();
     toast('All data erased');
   } else if (a === 'time') {
@@ -411,8 +441,14 @@ document.querySelector('main').addEventListener('change', async (ev) => {
   if (!file) return;
   try {
     const imported = await Store.readBackup(file);
-    if (!confirm('Replace everything on this phone with this backup?')) return;
+    const yesterday = E.addDays(E.dateStr(now()), -1);
+    let gap = 0;
+    for (let d = E.addDays(imported.lastSettledDate, 1); d <= yesterday; d = E.addDays(d, 1)) gap++;
+    const warning = gap ? `\n\nThis backup is ${gap} day${gap > 1 ? 's' : ''} old. Those days will be scored as missed.` : '';
+    if (!confirm(`Replace everything on this phone with this backup?${warning}`)) return;
+    Store.keepSafetyCopy(state, 'import');
     state = imported;
+    recovered = false;
     E.settle(state, now());
     commit();
     toast('Backup restored');

@@ -178,6 +178,7 @@ export function todaySummary(state, now) {
 
 export function toggleDone(state, goalId, now) {
   const today = dateStr(now);
+  if (isDayClosed(state, now)) return { ok: false, reason: 'This day is already closed.' };
   const goal = state.goals.find((g) => g.id === goalId);
   if (!goal || !isActiveOn(goal, today)) return { ok: false, reason: 'Goal is not active today.' };
   if (isLocked(goal, now)) return { ok: false, reason: `Locked since ${goal.deadline}.` };
@@ -188,6 +189,20 @@ export function toggleDone(state, goalId, now) {
   return { ok: true, done: i < 0 };
 }
 
+// True if today was already settled (phone clock/time zone moved backwards). Nothing can be ticked.
+export function isDayClosed(state, now) {
+  return dateStr(now) <= state.lastSettledDate;
+}
+
+function checkFields(clean, raw) {
+  if (!clean.name) return 'Name is required.';
+  // 00:00 would lock the goal for the whole day (guaranteed miss).
+  if (raw.deadline === '00:00') return 'A deadline of 00:00 locks the goal all day. Pick a later time.';
+  return null;
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 function cleanFields(f) {
   const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
   const target = num(f.target);
@@ -197,7 +212,7 @@ function cleanFields(f) {
     target: target != null && target > 0 ? target : null,
     unit: target != null && f.unit ? String(f.unit).trim() || null : null,
     carryOverExtra: target != null && extra != null && extra > 0 ? extra : null,
-    deadline: /^\d{2}:\d{2}$/.test(f.deadline ?? '') ? f.deadline : null,
+    deadline: TIME_RE.test(f.deadline ?? '') ? f.deadline : null,
   };
 }
 
@@ -209,7 +224,8 @@ function effectiveDate(state, now) {
 
 export function addGoal(state, fields, now) {
   const clean = cleanFields(fields);
-  if (!clean.name) return { ok: false, reason: 'Name is required.' };
+  const err = checkFields(clean, fields);
+  if (err) return { ok: false, reason: err };
   const goal = { id: makeId(), gid: makeId(), ...clean, activeFrom: effectiveDate(state, now), activeUntil: null };
   state.goals.push(goal);
   return { ok: true, goal };
@@ -224,11 +240,13 @@ export function latestVersion(state, gid) {
 
 export function editGoal(state, gid, fields, now) {
   const clean = cleanFields(fields);
-  if (!clean.name) return { ok: false, reason: 'Name is required.' };
+  const err = checkFields(clean, fields);
+  if (err) return { ok: false, reason: err };
   const today = dateStr(now);
   const from = effectiveDate(state, now);
   const latest = latestVersion(state, gid);
   if (!latest) return { ok: false, reason: 'Goal not found.' };
+  if (latest.activeUntil && latest.activeUntil <= today) return { ok: false, reason: 'This goal was removed. Undo the removal first.' };
   if (latest.activeFrom >= from) {
     // Not live yet (pending since today, or setup mode): change it in place.
     Object.assign(latest, clean);
@@ -290,17 +308,51 @@ export function goalRows(state, now) {
 }
 
 // ---------- validation ----------
+// Deep check so a corrupt or hand-edited backup can't break the app or inject markup.
+
+const isDate = (v) => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v);
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isStr = (v) => typeof v === 'string';
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const orNull = (check) => (v) => v === null || v === undefined || check(v);
+const isTime = (v) => typeof v === 'string' && TIME_RE.test(v);
+
+function validGoal(g) {
+  return (
+    isObj(g) && isStr(g.id) && isStr(g.gid) && isStr(g.name) &&
+    orNull(isNum)(g.target) && orNull(isStr)(g.unit) && orNull(isNum)(g.carryOverExtra) &&
+    orNull(isTime)(g.deadline) && isDate(g.activeFrom) && orNull(isDate)(g.activeUntil)
+  );
+}
+
+function validHistoryDay(h) {
+  return (
+    isObj(h) && Array.isArray(h.goals) &&
+    h.goals.every((e) => isObj(e) && isStr(e.gid) && isStr(e.id) && isStr(e.name) && typeof e.done === 'boolean' && orNull(isNum)(e.target) && orNull(isStr)(e.unit)) &&
+    [h.earned, h.penalty, h.net, h.multiplier, h.streakAfter].every(isNum) &&
+    typeof h.perfect === 'boolean'
+  );
+}
 
 export function validateState(s) {
   return !!(
-    s &&
-    typeof s === 'object' &&
+    isObj(s) &&
     s.schemaVersion === SCHEMA_VERSION &&
-    Array.isArray(s.goals) &&
-    Array.isArray(s.ledger) &&
-    s.days && typeof s.days === 'object' &&
-    s.history && typeof s.history === 'object' &&
-    typeof s.streak === 'number' &&
-    typeof s.lastSettledDate === 'string'
+    Array.isArray(s.goals) && s.goals.every(validGoal) &&
+    Array.isArray(s.ledger) && s.ledger.every((e) => isObj(e) && isDate(e.date) && (e.type === 'day' || e.type === 'purchase') && isNum(e.amount) && isStr(e.note)) &&
+    isObj(s.days) && Object.entries(s.days).every(([k, d]) => isDate(k) && isObj(d) && Array.isArray(d.done) && d.done.every(isStr)) &&
+    isObj(s.history) && Object.entries(s.history).every(([k, h]) => isDate(k) && validHistoryDay(h)) &&
+    Number.isInteger(s.streak) && s.streak >= 0 &&
+    isDate(s.lastSettledDate) &&
+    // Settled days must not be ahead of lastSettledDate, open days must be after it.
+    Object.keys(s.history).every((k) => k <= s.lastSettledDate) &&
+    Object.keys(s.days).every((k) => k > s.lastSettledDate)
   );
+}
+
+// Upgrade older saved data to the current schema. Add a step here whenever SCHEMA_VERSION goes up.
+export function migrate(s) {
+  if (!isObj(s)) return s;
+  // e.g. if (s.schemaVersion === 1) { ...; s.schemaVersion = 2; }
+  return s;
 }

@@ -246,3 +246,62 @@ test('validateState', () => {
   assert.equal(E.validateState({}), false);
   assert.equal(E.validateState(null), false);
 });
+
+// ---------- regressions from code review / QA ----------
+
+test('deadline 00:00 is rejected; invalid times are dropped', () => {
+  const s = fresh([]);
+  assert.equal(E.addGoal(s, { name: 'Mid', deadline: '00:00' }, at('2026-10-10')).ok, false);
+  const { goal } = E.addGoal(s, { name: 'Bad', deadline: '25:99' }, at('2026-10-10'));
+  assert.equal(goal.deadline, null);
+  assert.equal(E.editGoal(s, goal.gid, { name: 'Bad', deadline: '00:00' }, at('2026-10-10')).ok, false);
+});
+
+test('clock moved back after settling: day is closed, ticks rejected', () => {
+  const s = setup(THREE);
+  E.settle(s, at('2026-10-15')); // e.g. clock jumped forward
+  assert.equal(E.isDayClosed(s, at('2026-10-11')), true);
+  const id = ids(s, '2026-10-11')[0];
+  assert.equal(E.toggleDone(s, id, at('2026-10-11')).ok, false);
+  assert.equal(s.days['2026-10-11'], undefined);
+  assert.equal(E.isDayClosed(s, at('2026-10-15')), false);
+});
+
+test('editing a goal removed today is rejected (must undo first)', () => {
+  const s = setup(THREE);
+  const now = at('2026-10-10');
+  const read = E.activeGoals(s, '2026-10-10').find((g) => g.name === 'Read');
+  E.removeGoal(s, read.gid, now);
+  assert.equal(E.editGoal(s, read.gid, { name: 'Read more' }, now).ok, false);
+  assert.equal(E.restoreGoal(s, read.gid, now).ok, true);
+  assert.equal(E.editGoal(s, read.gid, { name: 'Read more' }, now).ok, true);
+});
+
+test('validateState rejects malformed backups', () => {
+  const good = () => {
+    const s = setup(THREE);
+    doAll(s, '2026-10-10');
+    E.settle(s, at('2026-10-12'));
+    return JSON.parse(JSON.stringify(s));
+  };
+  assert.equal(E.validateState(good()), true);
+  const bad = [
+    (s) => (s.lastSettledDate = 'garbage'),
+    (s) => (s.ledger[0].amount = '5'),
+    (s) => (s.goals = [null]),
+    (s) => (s.ledger = [null]),
+    (s) => (s.history = []),
+    (s) => (s.days = []),
+    (s) => (s.goals[0].deadline = '<img src=x onerror=alert(1)>'),
+    (s) => (s.goals[0].target = '50'),
+    (s) => (s.history['2026-10-10'].goals[0].done = 'yes'),
+    (s) => (s.lastSettledDate = '1900-01-01'), // history ahead of lastSettledDate
+    (s) => (s.days['2026-10-01'] = { done: [] }), // open day already settled
+    (s) => (s.streak = -1),
+  ];
+  for (const mutate of bad) {
+    const s = good();
+    mutate(s);
+    assert.equal(E.validateState(s), false, mutate.toString());
+  }
+});
