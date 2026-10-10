@@ -21,6 +21,9 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="css/app.css">
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -33,6 +36,7 @@
 
   <main>
     <section id="view-today" class="view"></section>
+    <section id="view-house" class="view" hidden></section>
     <section id="view-history" class="view" hidden></section>
     <section id="view-goals" class="view" hidden></section>
     <section id="view-settings" class="view" hidden></section>
@@ -40,6 +44,7 @@
 
   <nav class="tabbar" aria-label="Sections">
     <button data-tab="today" class="active"><span class="tab-icon">✓</span>Today</button>
+    <button data-tab="house"><span class="tab-icon">⌂</span>House</button>
     <button data-tab="history"><span class="tab-icon">▦</span>History</button>
     <button data-tab="goals"><span class="tab-icon">☰</span>Goals</button>
     <button data-tab="settings"><span class="tab-icon">⚙</span>Settings</button>

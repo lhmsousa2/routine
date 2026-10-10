@@ -118,13 +118,14 @@ function toast(msg) {
 function render() {
   const n = now();
   $('#topbar-date').textContent = n.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-  $('#topbar-title').textContent = { today: 'Today', history: 'History', goals: 'Goals', settings: 'Settings' }[tab];
+  $('#topbar-title').textContent = { today: 'Today', house: 'House', history: 'History', goals: 'Goals', settings: 'Settings' }[tab];
+  document.body.classList.toggle('house-mode', tab === 'house');
   const bal = E.balance(state);
   $('#balance').innerHTML = `<span class="coin">●</span> ${bal}`;
   $('#balance').classList.toggle('negative', bal < 0);
   for (const b of document.querySelectorAll('.tabbar button')) b.classList.toggle('active', b.dataset.tab === tab);
-  for (const v of ['today', 'history', 'goals', 'settings']) $(`#view-${v}`).hidden = v !== tab;
-  ({ today: renderToday, history: renderHistory, goals: renderGoals, settings: renderSettings })[tab](n);
+  for (const v of ['today', 'house', 'history', 'goals', 'settings']) $(`#view-${v}`).hidden = v !== tab;
+  ({ today: renderToday, house: renderHouse, history: renderHistory, goals: renderGoals, settings: renderSettings })[tab](n);
 }
 
 function renderToday(n) {
@@ -196,6 +197,24 @@ function renderToday(n) {
         })
         .join('')}
     </ul>`;
+}
+
+// The house (3D) loads on first visit so the rest of the app stays fast.
+let houseUI = null;
+let houseLoading = null;
+function renderHouse() {
+  if (houseUI) return houseUI.refresh();
+  const el = $('#view-house');
+  houseLoading ??= import('./house/ui.js')
+    .then((m) => {
+      houseUI = m;
+      m.mount(el, { getState: () => state, commit, toast, now });
+      if (tab === 'house') m.refresh();
+    })
+    .catch((e) => {
+      houseLoading = null;
+      el.innerHTML = `<p class="pad">Could not load the house: ${esc(e.message)}</p>`;
+    });
 }
 
 function renderHistory(n) {
@@ -345,6 +364,7 @@ function renderSettings() {
         <button class="btn ghost" data-action="time" data-ms="3600000">+1 hour</button>
         <button class="btn ghost" data-action="time" data-ms="86400000">+1 day</button>
         <button class="btn ghost" data-action="time" data-ms="reset">Reset clock</button>
+        <button class="btn ghost" data-action="debug-coins">+500 coins</button>
       </div>
     </div>`
         : ''
@@ -452,6 +472,9 @@ document.querySelector('main').addEventListener('click', async (ev) => {
     recovered = false;
     commit();
     toast('All data erased');
+  } else if (a === 'debug-coins' && DEBUG) {
+    state.ledger.push({ date: E.dateStr(now()), type: 'sale', amount: 500, note: 'Debug coins' });
+    commit();
   } else if (a === 'theme') {
     setTheme(b.dataset.theme);
     render();

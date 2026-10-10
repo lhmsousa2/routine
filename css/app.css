@@ -228,7 +228,7 @@ main { padding: 4px 16px 16px; max-width: 560px; margin: 0 auto; }
 /* ---------- tab bar ---------- */
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
-  display: grid; grid-template-columns: repeat(4, 1fr);
+  display: grid; grid-template-columns: repeat(5, 1fr);
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   border-top: 1px solid var(--border);
@@ -273,3 +273,61 @@ dialog::backdrop { background: rgb(0 0 0 / .4); }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* ---------- house ---------- */
+body.house-mode { overflow: hidden; }
+body.house-mode .topbar { position: fixed; left: 0; right: 0; background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
+body.house-mode .topbar .coin-pill { pointer-events: auto; }
+#view-house { position: fixed; inset: 0; z-index: 1; }
+.house-canvas { position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 40%, var(--surface) 0%, var(--bg) 70%); }
+.house-canvas canvas { display: block; }
+.house-hint {
+  position: absolute; left: 12px; right: 12px; top: calc(84px + env(safe-area-inset-top));
+  background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: 14px; padding: 10px 14px; font-size: 14px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.house-bar {
+  position: absolute; left: 12px; right: 12px; bottom: calc(80px + env(safe-area-inset-bottom));
+  display: flex; gap: 6px; justify-content: center;
+}
+.house-bar button {
+  flex: 1; max-width: 92px; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border); border-radius: 14px; padding: 8px 4px; font-size: 11px; font-weight: 650; box-shadow: var(--shadow);
+  position: relative; min-height: 54px;
+}
+.house-bar button span { font-size: 18px; line-height: 1.1; }
+.house-bar button.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.house-bar button:disabled { opacity: .45; }
+.house-bar .count { position: absolute; top: 4px; right: 8px; background: var(--bad); color: #fff; border-radius: 99px; font-size: 10px; padding: 0 5px; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chips.scroll { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; margin: 0 -4px 10px; padding-left: 4px; scrollbar-width: none; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 99px; padding: 6px 12px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.chip.on { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.chip.add { border-style: dashed; color: var(--muted); }
+
+dialog.sheet {
+  margin: auto auto 0; width: 100%; max-width: 560px; max-height: 86vh; border-radius: 22px 22px 0 0;
+  padding: 0; overflow: hidden;
+}
+.sheet-body { padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); overflow-y: auto; max-height: 86vh; }
+.sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.sheet-head h2 { font-size: 20px; }
+.product { margin-bottom: 16px; }
+.product h3 { margin-bottom: 8px; }
+.tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.tier-card { background: var(--surface-2); border-radius: 14px; padding: 8px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 3px; border: 2px solid transparent; }
+.tier-card img { width: 72px; height: 72px; object-fit: contain; }
+.tier-card .btn { width: 100%; margin-top: auto; }
+.tier-label { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.tier-cheap .tier-label { color: #c2187a; }
+.tier-premium { border-color: color-mix(in srgb, var(--gold) 50%, transparent); }
+.tier-premium .tier-label { color: var(--gold); }
+.tier-name { font-size: 13px; font-weight: 650; line-height: 1.2; }
+.owned { font-size: 11px; color: var(--accent); font-weight: 700; }
+.storage { list-style: none; margin: 0 0 12px; padding: 0; }
+.storage li { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.storage img { width: 48px; height: 48px; object-fit: contain; background: var(--surface-2); border-radius: 10px; }
+.grow { flex: 1; min-width: 0; }
+.room-swatch { width: 32px; height: 32px; border-radius: 8px; flex: none; }

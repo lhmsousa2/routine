@@ -1,6 +1,6 @@
-// Offline support. Network-first so the app is always current when online,
+// Offline support. 3D models are cached the first time they load. Network-first so the app is always current when online,
 // but fall back to the cached copy if the network is down or slower than 3 seconds.
-const CACHE = 'routine-v2';
+const CACHE = 'routine-v3';
 const SHELL = [
   './',
   'index.html',
@@ -8,6 +8,18 @@ const SHELL = [
   'js/app.js',
   'js/engine.js',
   'js/store.js',
+  'js/house/ui.js',
+  'js/house/scene.js',
+  'js/house/house.js',
+  'js/house/catalog.js',
+  'js/house/models.js',
+  'js/house/state.js',
+  'vendor/three/three.module.min.js',
+  'vendor/three/three.core.js',
+  'vendor/three/addons/controls/OrbitControls.js',
+  'vendor/three/addons/loaders/GLTFLoader.js',
+  'vendor/three/addons/utils/BufferGeometryUtils.js',
+  'vendor/three/addons/utils/SkeletonUtils.js',
   'manifest.json',
   'icons/icon-180.png',
   'icons/icon-192.png',
