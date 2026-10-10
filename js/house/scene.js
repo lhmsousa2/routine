@@ -39,8 +39,29 @@ function box(x0, y0, z0, x1, y1, z1, color, opts) {
 const loader = new GLTFLoader();
 const gltfCache = new Map();
 function loadGltf(name) {
-  if (!gltfCache.has(name)) gltfCache.set(name, loader.loadAsync(MODEL_URL(name)).then((g) => g.scene));
+  if (!gltfCache.has(name)) {
+    const p = loader.loadAsync(MODEL_URL(name)).then((g) => g.scene);
+    p.catch(() => gltfCache.delete(name)); // retry next time (e.g. was offline)
+    gltfCache.set(name, p);
+  }
   return gltfCache.get(name);
+}
+
+// Simple box in the item's bounds, used if its model can't load (e.g. offline), so it stays tappable.
+function placeholder(item) {
+  const b = bounds(item);
+  const g = new THREE.Group();
+  g.add(box(b.min[0], b.min[1], b.min[2], b.max[0], b.max[1], b.max[2], '#c9bba4', { transparent: true, opacity: 0.7 }));
+  return g;
+}
+
+async function buildModelSafe(item) {
+  try {
+    return await buildModel(item);
+  } catch (e) {
+    console.warn('Model failed to load', item.model, e);
+    return placeholder(item);
+  }
 }
 
 function paletteFor(item) {
@@ -357,34 +378,49 @@ export class HouseScene {
   updateWalls() {
     if (!this.wallSegs) return;
     const camDir = this.cam.position.clone().sub(this.controls.target).setY(0).normalize();
+    const c = this.houseCenter();
     for (const seg of this.wallSegs) {
       const { wall, out, opening } = seg.userData;
       let low = this.wallMode === 'down';
       if (this.wallMode === 'cutaway') {
-        const facing = out[0] * camDir.x + out[1] * camDir.z;
-        low = wall.type === 'interior' ? true : facing > 0.2;
+        if (wall.type === 'interior') {
+          // Inner walls: cut the ones in the half of the house nearest the camera
+          const mx = seg.position.x + Math.cos(seg.rotation.y) * (TW / 2) - c.x;
+          const mz = seg.position.z - Math.sin(seg.rotation.y) * (TW / 2) - c.z;
+          low = mx * camDir.x + mz * camDir.z > 0.01;
+        } else {
+          low = out[0] * camDir.x + out[1] * camDir.z > 0.2;
+        }
       }
       const placing = this.mode.type === 'place' && this.mode.opening;
       if (placing) low = false; // show walls to place doors/windows on
+      seg.userData.low = low;
       const key = `${low}|${opening?.uid ?? ''}|${opening?.itemId ?? ''}`;
       if (seg.userData.key === key) continue;
       seg.userData.key = key;
       clearGroup(seg);
       this.buildSegment(seg, wall, low, opening);
     }
-    // Hide wall-mounted items whose wall is cut away
+    // Hide wall-mounted items whose wall is cut away (but never the one being moved)
     for (const [uid, obj] of this.itemObjects) {
       const it = this.state.house.items.find((i) => i.uid === uid);
       if (!it || ITEMS[it.itemId].kind !== 'wall') continue;
-      obj.visible = !this.isItemWallLow(it, camDir);
+      obj.visible = (this.mode.type === 'place' && this.mode.uid === uid) || !this.isItemWallLow(it);
     }
   }
 
-  isItemWallLow(it, camDir) {
+  houseCenter() {
+    const t = this.state.house.tiles;
+    return {
+      x: (t.reduce((a, b) => a + b.x, 0) / t.length + 0.5) * TW,
+      z: (t.reduce((a, b) => a + b.z, 0) / t.length + 0.5) * TW,
+    };
+  }
+
+  isItemWallLow(it) {
     if (this.wallMode === 'down') return true;
     if (this.wallMode === 'up') return false;
     const [bx, bz] = BACK[it.rot];
-    // the wall behind: interior walls are always low in cutaway
     const { w, d } = rotatedSize(ITEMS[it.itemId], it.rot);
     const cx = Math.floor((it.x + (bx > 0 ? w - 1 : 0)) / TILE);
     const cz = Math.floor((it.z + (bz > 0 ? d - 1 : 0)) / TILE);
@@ -395,9 +431,7 @@ export class HouseScene {
       const opp = { n: 's', s: 'n', e: 'w', w: 'e' }[side];
       return wl.x === cx + bx && wl.z === cz + bz && wl.side === opp;
     });
-    if (!seg) return false;
-    if (seg.userData.wall.type === 'interior') return true;
-    return bx * camDir.x + bz * camDir.z > 0.2;
+    return !!seg?.userData.low;
   }
 
   buildSegment(seg, wall, low, opening) {
@@ -429,7 +463,9 @@ export class HouseScene {
       seg.add(win);
     } else {
       add(DOOR_H, WALL_H);
-      buildModel(item).then((m) => {
+      const key = seg.userData.key;
+      buildModelSafe(item).then((m) => {
+        if (seg.userData.key !== key || !seg.parent) return; // wall was rebuilt meanwhile
         const b = bounds(item);
         m.position.set(TW / 2 - (b.min[0] + b.max[0]) / 2, 0, (z0 + z1) / 2 - (b.min[2] + b.max[2]) / 2);
         seg.add(m);
@@ -444,6 +480,7 @@ export class HouseScene {
     for (const [uid, obj] of this.itemObjects) {
       if (!keep.has(uid)) {
         this.groups.items.remove(obj);
+        clearGroup(obj);
         this.itemObjects.delete(uid);
       }
     }
@@ -452,9 +489,13 @@ export class HouseScene {
         const item = ITEMS[it.itemId];
         let obj = this.itemObjects.get(it.uid);
         if (!obj || obj.userData.itemId !== it.itemId) {
-          if (obj) this.groups.items.remove(obj);
-          const model = await buildModel(item);
+          const model = await buildModelSafe(item);
           if (token !== this.buildToken) return;
+          const old = this.itemObjects.get(it.uid);
+          if (old) {
+            this.groups.items.remove(old);
+            clearGroup(old);
+          }
           obj = new THREE.Group();
           obj.userData = { uid: it.uid, itemId: it.itemId };
           obj.add(model);
@@ -483,7 +524,10 @@ export class HouseScene {
   // ---------- modes & overlay ----------
 
   clearGhost() {
-    if (this.ghost) this.scene.remove(this.ghost.obj);
+    if (this.ghost) {
+      this.scene.remove(this.ghost.obj);
+      clearGroup(this.ghost.obj);
+    }
     this.ghost = null;
   }
 
@@ -503,6 +547,7 @@ export class HouseScene {
   }
 
   async updateOverlay() {
+    const gen = (this.overlayGen = (this.overlayGen ?? 0) + 1);
     const g = this.groups.overlay;
     clearGroup(g);
     if (!this.state) return;
@@ -543,11 +588,12 @@ export class HouseScene {
       }
       // The object to move: the placed item, or a ghost for something coming out of Storage.
       let obj = this.itemObjects.get(uid);
-      if (!obj) {
+      if (!obj && this.mode.type === 'place') {
         if (this.ghost?.uid !== uid || this.ghost.itemId !== itemId) {
           this.clearGhost();
-          const model = await buildModel(item);
-          if (this.mode.uid !== uid) return;
+          const model = await buildModelSafe(item);
+          // A newer overlay update started while loading: let it finish instead.
+          if (gen !== this.overlayGen) return;
           const ghost = new THREE.Group();
           ghost.userData = { uid, itemId, ghost: true };
           ghost.add(model);
@@ -557,7 +603,7 @@ export class HouseScene {
         obj = this.ghost.obj;
       }
       const y = valid?.y ?? checkPlacement(this.state, uid, itemId, pos).y ?? 0;
-      this.positionItem(obj, item, pos, y);
+      if (obj) this.positionItem(obj, item, pos, y);
       const { w, d } = rotatedSize(item, pos.rot);
       const ok = this.mode.type === 'selected' || valid?.ok;
       const color = this.mode.type === 'selected' ? '#4e6f9c' : ok ? '#5f8a55' : '#bf4a3c';
@@ -586,7 +632,11 @@ export class HouseScene {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const v = new THREE.Vector2(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
     this.raycaster.setFromCamera(v, this.cam);
-    return { hits: this.raycaster.intersectObjects(objects, true), ray: this.raycaster.ray };
+    const visible = (o) => {
+      for (; o; o = o.parent) if (!o.visible) return false;
+      return true;
+    };
+    return { hits: this.raycaster.intersectObjects(objects, true).filter((h) => visible(h.object)), ray: this.raycaster.ray };
   }
 
   groundPoint(ev) {
@@ -611,8 +661,16 @@ export class HouseScene {
     el.addEventListener('pointerdown', (ev) => {
       pointers++;
       down = { x: ev.clientX, y: ev.clientY, t: Date.now() };
+      if (pointers > 1) {
+        // Second finger: stop dragging the item and hand the gesture to the camera.
+        if (dragging) this.cb.onDragEnd?.();
+        dragging = false;
+        this.controls.enabled = true;
+        down = null;
+        return;
+      }
       dragging = false;
-      if (pointers > 1 || this.mode.type !== 'place') return;
+      if (this.mode.type !== 'place') return;
       // Start dragging if the finger lands on the item being placed (or its pad)
       const targets = [this.groups.items, this.groups.overlay, ...(this.ghost ? [this.ghost.obj] : [])];
       const { hits } = this.pick(ev, targets);
@@ -642,6 +700,7 @@ export class HouseScene {
     });
     const end = (ev) => {
       pointers = Math.max(0, pointers - 1);
+      if (pointers === 0) this.controls.enabled = true;
       if (dragging) {
         dragging = false;
         this.controls.enabled = true;
@@ -711,7 +770,7 @@ export class HouseScene {
       scene.add(l);
       let model;
       if (item.kind === 'window') model = procModel('@window', paletteFor(item), item);
-      else model = await buildModel(item);
+      else model = await buildModelSafe(item);
       const box3 = new THREE.Box3().setFromObject(model);
       const size = box3.getSize(new THREE.Vector3());
       const center = box3.getCenter(new THREE.Vector3());
@@ -724,6 +783,7 @@ export class HouseScene {
       thumbRenderer.render(scene, cam);
       return thumbRenderer.domElement.toDataURL('image/png');
     })();
+    p.catch(() => thumbCache.delete(item.id));
     thumbCache.set(item.id, p);
     return p;
   }

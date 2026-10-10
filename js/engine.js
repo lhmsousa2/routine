@@ -1,5 +1,5 @@
 // Pure game logic: no DOM, no storage. Everything here is unit-tested.
-import { newHouse, validateHouse } from './house/state.js';
+import { newHouse, validateHouse, sanitizeHouse } from './house/state.js';
 // Dates are local calendar days as 'YYYY-MM-DD' strings.
 
 export const SCHEMA_VERSION = 2;
@@ -39,7 +39,7 @@ export function newState(now) {
     goals: [],           // goal versions: {id, gid, name, target, unit, carryOverExtra, deadline, activeFrom, activeUntil}
     days: {},            // unsettled days: {date: {done: [goalVersionId]}}
     history: {},         // settled days: {date: {goals: [...], earned, penalty, net, multiplier, perfect, streakAfter}}
-    ledger: [],          // {date, type: 'day'|'purchase', amount, note}
+    ledger: [],          // {date, type: 'day'|'purchase'|'sale', amount, note}
     streak: 0,
     lastSettledDate: addDays(dateStr(now), -1),
     house: newHouse(makeId),
@@ -364,5 +364,6 @@ export function migrate(s) {
     s.house = newHouse(makeId);
     s.schemaVersion = 2;
   }
+  if (s.schemaVersion === 2) sanitizeHouse(s.house);
   return s;
 }

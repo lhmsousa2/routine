@@ -223,7 +223,7 @@ function onDrag(pos) {
 
 function onTap(hit) {
   if (mode.type === 'floor') {
-    if (!hit.tile) return;
+    if (!hit.tile || ctx.rolledOver()) return;
     const price = H.nextTilePrice(state());
     if (!confirm(`Buy 1 m² of ${ROOMS[floorRoom].name} for ${price} coins?`)) return;
     const r = H.buyTile(state(), hit.tile.x, hit.tile.z, floorRoom, ctx.now());
@@ -357,6 +357,8 @@ function onSheet(ev) {
   const b = ev.target.closest('[data-sheet]');
   if (!b) return;
   const d = root.querySelector('#house-sheet');
+  // Settle a day that just ended before any coins change hands.
+  if (['buy', 'sell', 'do-upgrade', 'unlock'].includes(b.dataset.sheet) && ctx.rolledOver()) return d.close();
   const s = state();
   switch (b.dataset.sheet) {
     case 'close':
@@ -396,7 +398,8 @@ function onSheet(ev) {
       if (r.inPlace) {
         mode = { type: 'selected', uid: r.uid };
         ctx.commit();
-        return ctx.toast('Upgraded! The old one is in Storage.');
+        const extra = r.stored.length ? ` Also moved: ${r.stored.join(', ')}.` : '';
+        return ctx.toast(`Upgraded! The old one is in Storage.${extra}`);
       }
       ctx.commit();
       ctx.toast('It doesn’t fit in the same spot. Place it somewhere.');

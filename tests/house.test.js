@@ -236,3 +236,64 @@ test('every catalog item has a model and a sane footprint', () => {
     assert.ok(it.price >= 0, it.id);
   }
 });
+
+// ---------- regressions from review ----------
+
+test('a small item straddling two surfaces: moving one surface stores the item, not the other surface', () => {
+  const s = fresh(5000);
+  room(s, 4, 2);
+  s.house.items = [];
+  const a = buyPlace(s, 'counter-cheap', { x: 2, z: 0, rot: 0 });
+  const b = buyPlace(s, 'counter-cheap', { x: 4, z: 0, rot: 0 });
+  const tv = buyPlace(s, 'tv-cheap', { x: 3, z: 0, rot: 0 });
+  assert.equal(tv.ok, true, tv.reason);
+  const r = H.storeItem(s, a.uid);
+  assert.equal(r.ok, true);
+  assert.equal(s.house.items.find((i) => i.uid === b.uid).placed, true, 'other counter stays');
+  assert.equal(s.house.items.find((i) => i.uid === tv.uid).placed, false, 'tv goes to storage');
+});
+
+test('furniture cannot stand across a wall between rooms', () => {
+  const s = fresh(5000);
+  room(s, 1, 1);
+  s.house.rooms.push('kitchen');
+  s.house.tiles.push({ x: 1, z: 0, room: 'kitchen' });
+  s.house.items = [];
+  // bench is 2 cells wide: cells 1..2 cross the bedroom/kitchen wall at x = 2
+  assert.equal(H.checkPlacement(s, null, 'bench-standard', { x: 1, z: 0, rot: 0 }).ok, false);
+  assert.equal(H.checkPlacement(s, null, 'bench-standard', { x: 2, z: 0, rot: 0 }).ok, true);
+  // same room across tiles is fine
+  s.house.tiles.push({ x: 0, z: 1, room: 'bedroom' });
+  assert.equal(H.checkPlacement(s, null, 'bench-standard', { x: 0, z: 1, rot: 1 }).ok, true);
+});
+
+test('migrate repairs house data from an older catalogue instead of losing the save', () => {
+  const s = fresh(100);
+  s.goals.push({ id: 'a', gid: 'a', name: 'Read', target: null, unit: null, carryOverExtra: null, deadline: null, activeFrom: '2026-10-09', activeUntil: null });
+  s.house.items.push({ uid: 'gone', itemId: 'removed-item', placed: false });
+  s.house.items.push({ uid: 'weird', itemId: 'window-cheap', placed: true, x: 0, z: 0, rot: 1 }); // rot on a window
+  s.house.rooms.push('attic');
+  s.house.tiles.push({ x: 1, z: 0, room: 'attic' });
+  const copy = JSON.parse(JSON.stringify(s));
+  assert.equal(E.validateState(copy), false);
+  const m = E.migrate(copy);
+  assert.equal(E.validateState(m), true);
+  assert.equal(m.goals.length, 1);
+  assert.equal(E.balance(m), 100);
+  assert.ok(!m.house.items.some((i) => i.uid === 'gone'));
+  assert.equal(m.house.items.find((i) => i.uid === 'weird').placed, false);
+  assert.equal(m.house.tiles[1].room, 'bedroom');
+});
+
+test('small items cannot bridge surfaces of different heights; bad position shapes are rejected', () => {
+  const s = fresh(5000);
+  room(s, 3, 3);
+  s.house.items = [];
+  buyPlace(s, 'nightstand-cheap', { x: 0, z: 0, rot: 0 });
+  buyPlace(s, 'filing-standard', { x: 1, z: 0, rot: 0 });
+  assert.equal(H.checkPlacement(s, null, 'books-cheap', { x: 0, z: 0, rot: 0 }).ok, true, 'fits on the nightstand alone');
+  const wide = H.checkPlacement(s, null, 'tv-cheap', { x: 0, z: 0, rot: 0 });
+  assert.equal(wide.ok, false);
+  assert.equal(H.checkPlacement(s, null, 'window-cheap', { x: 0, z: 0, rot: 0 }).ok, false);
+  assert.equal(H.checkPlacement(s, null, 'plant-cheap', { x: 4, z: 4, side: 'n' }).ok, false);
+});

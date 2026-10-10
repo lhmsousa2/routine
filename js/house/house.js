@@ -149,6 +149,18 @@ function wallSegmentsBehind(house, item, x, z, rot, map) {
   return segs;
 }
 
+// True if two neighbouring cells of a footprint sit on different sides of a wall.
+function crossesWall(house, cells, map) {
+  const set = new Set(cells.map(([a, b]) => key(a, b)));
+  for (const [cx, cz] of cells) {
+    const tx = tileOfCell(cx);
+    const tz = tileOfCell(cz);
+    if (set.has(key(cx + 1, cz)) && tileOfCell(cx + 1) !== tx && wallType(house, tx, tz, 'e', map)) return true;
+    if (set.has(key(cx, cz + 1)) && tileOfCell(cz + 1) !== tz && wallType(house, tx, tz, 's', map)) return true;
+  }
+  return false;
+}
+
 const placedOthers = (house, uid) => house.items.filter((it) => it.placed && it.uid !== uid);
 
 function cellSet(house, items) {
@@ -160,24 +172,30 @@ function cellSet(house, items) {
 // Where a small item would rest: 'floor', 'surface' (+ height), or null if half on furniture.
 function smallSupport(house, cells, uid) {
   const supports = placedOthers(house, uid).filter((it) => ITEMS[it.itemId].surface);
-  let top = 0;
+  const heights = new Set();
   let covered = 0;
   for (const [cx, cz] of cells) {
     const under = supports.filter((s) => cellsOf(ITEMS[s.itemId], s.x, s.z, s.rot).some(([a, b]) => a === cx && b === cz));
     if (under.length) {
       covered++;
-      for (const s of under) top = Math.max(top, height(ITEMS[s.itemId]));
+      for (const s of under) heights.add(Math.round(height(ITEMS[s.itemId]) * 100) / 100);
     }
   }
   if (covered === 0) return { on: 'floor', y: 0 };
-  if (covered === cells.length) return { on: 'surface', y: top };
+  // Fully supported, and level (not bridging two surfaces of different heights).
+  if (covered === cells.length && heights.size === 1) return { on: 'surface', y: [...heights][0] };
   return null;
 }
 
 // Is a small item resting on something (vs the floor)? Used to decide floor-layer conflicts.
+// Half-supported items count as neither, so they never block anything (revalidate stores them).
 function smallOnFloor(house, it) {
   const s = smallSupport(house, cellsOf(ITEMS[it.itemId], it.x, it.z, it.rot), it.uid);
-  return !s || s.on === 'floor';
+  return s?.on === 'floor';
+}
+function smallOnSurface(house, it) {
+  const s = smallSupport(house, cellsOf(ITEMS[it.itemId], it.x, it.z, it.rot), it.uid);
+  return s?.on === 'surface';
 }
 
 function openingSegments(house, uid) {
@@ -200,6 +218,9 @@ export function checkPlacement(state, uid, itemId, pos) {
   const house = state.house;
   const item = ITEMS[itemId];
   const map = tileMap(house);
+  if (!item || !Number.isInteger(pos?.x) || !Number.isInteger(pos?.z)) return { ok: false, reason: 'Invalid position.' };
+  if (isOpening(item) ? !SIDE_DIR[pos.side] : !(Number.isInteger(pos.rot) && pos.rot >= 0 && pos.rot <= 3 && pos.side == null))
+    return { ok: false, reason: 'Invalid position.' };
 
   if (isOpening(item)) {
     const type = wallType(house, pos.x, pos.z, pos.side, map);
@@ -214,6 +235,7 @@ export function checkPlacement(state, uid, itemId, pos) {
 
   const cells = cellsOf(item, pos.x, pos.z, pos.rot);
   if (!cells.every(([cx, cz]) => map.has(key(tileOfCell(cx), tileOfCell(cz))))) return { ok: false, reason: 'Must be on your floor.' };
+  if (crossesWall(house, cells, map)) return { ok: false, reason: 'It can’t stand across a wall.' };
   const others = placedOthers(house, uid);
   const sameKind = (k) => others.filter((it) => ITEMS[it.itemId].kind === k);
   const overlaps = (items) => {
@@ -229,11 +251,11 @@ export function checkPlacement(state, uid, itemId, pos) {
     }
     case 'small': {
       const support = smallSupport(house, cells, uid);
-      if (!support) return { ok: false, reason: 'Put it fully on the floor or fully on furniture.' };
+      if (!support) return { ok: false, reason: 'Put it fully on the floor or fully on one level surface.' };
       if (support.on === 'floor') {
         const floorLayer = [...sameKind('floor'), ...sameKind('small').filter((it) => smallOnFloor(house, it))];
         if (overlaps(floorLayer)) return { ok: false, reason: 'Something is in the way.' };
-      } else if (overlaps(sameKind('small').filter((it) => !smallOnFloor(house, it)))) {
+      } else if (overlaps(sameKind('small').filter((it) => smallOnSurface(house, it)))) {
         return { ok: false, reason: 'Something is in the way.' };
       }
       return { ok: true, y: support.y };
@@ -284,7 +306,7 @@ function itemsOnTop(state, base) {
   return state.house.items.filter((it) => {
     if (!it.placed || it.uid === base.uid || ITEMS[it.itemId].kind !== 'small') return false;
     const cells = cellsOf(ITEMS[it.itemId], it.x, it.z, it.rot);
-    return !smallOnFloor(state.house, it) && cells.every(([a, b]) => baseCells.has(key(a, b)));
+    return smallOnSurface(state.house, it) && cells.every(([a, b]) => baseCells.has(key(a, b)));
   });
 }
 

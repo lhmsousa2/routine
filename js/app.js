@@ -208,7 +208,7 @@ function renderHouse() {
   houseLoading ??= import('./house/ui.js')
     .then((m) => {
       houseUI = m;
-      m.mount(el, { getState: () => state, commit, toast, now });
+      m.mount(el, { getState: () => state, commit, toast, now, rolledOver });
       if (tab === 'house') m.refresh();
     })
     .catch((e) => {
