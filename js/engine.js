@@ -1,7 +1,8 @@
 // Pure game logic: no DOM, no storage. Everything here is unit-tested.
+import { newHouse, validateHouse } from './house/state.js';
 // Dates are local calendar days as 'YYYY-MM-DD' strings.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const REWARD = 5;
 export const PENALTY = 15;
 // Multiplier applies to earnings only, based on the perfect-day streak *before* the day.
@@ -41,6 +42,7 @@ export function newState(now) {
     ledger: [],          // {date, type: 'day'|'purchase', amount, note}
     streak: 0,
     lastSettledDate: addDays(dateStr(now), -1),
+    house: newHouse(makeId),
   };
 }
 
@@ -317,6 +319,9 @@ const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const orNull = (check) => (v) => v === null || v === undefined || check(v);
 const isTime = (v) => typeof v === 'string' && TIME_RE.test(v);
 
+// day = daily settlement, purchase = house shop (negative), sale = selling from storage (positive)
+const LEDGER_TYPES = ['day', 'purchase', 'sale'];
+
 function validGoal(g) {
   return (
     isObj(g) && isStr(g.id) && isStr(g.gid) && isStr(g.name) &&
@@ -338,8 +343,9 @@ export function validateState(s) {
   return !!(
     isObj(s) &&
     s.schemaVersion === SCHEMA_VERSION &&
+    validateHouse(s.house) &&
     Array.isArray(s.goals) && s.goals.every(validGoal) &&
-    Array.isArray(s.ledger) && s.ledger.every((e) => isObj(e) && isDate(e.date) && (e.type === 'day' || e.type === 'purchase') && isNum(e.amount) && isStr(e.note)) &&
+    Array.isArray(s.ledger) && s.ledger.every((e) => isObj(e) && isDate(e.date) && LEDGER_TYPES.includes(e.type) && isNum(e.amount) && isStr(e.note)) &&
     isObj(s.days) && Object.entries(s.days).every(([k, d]) => isDate(k) && isObj(d) && Array.isArray(d.done) && d.done.every(isStr)) &&
     isObj(s.history) && Object.entries(s.history).every(([k, h]) => isDate(k) && validHistoryDay(h)) &&
     Number.isInteger(s.streak) && s.streak >= 0 &&
@@ -353,6 +359,10 @@ export function validateState(s) {
 // Upgrade older saved data to the current schema. Add a step here whenever SCHEMA_VERSION goes up.
 export function migrate(s) {
   if (!isObj(s)) return s;
-  // e.g. if (s.schemaVersion === 1) { ...; s.schemaVersion = 2; }
+  if (s.schemaVersion === 1) {
+    // v2: house game. Existing goals, history and coins are untouched.
+    s.house = newHouse(makeId);
+    s.schemaVersion = 2;
+  }
   return s;
 }

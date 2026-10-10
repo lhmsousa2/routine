@@ -56,6 +56,27 @@ function rolledOver() {
   return true;
 }
 
+// ---------- theme (per device) ----------
+
+const THEME_KEY = 'routine.theme';
+function theme() {
+  try {
+    return localStorage.getItem(THEME_KEY) || 'system';
+  } catch {
+    return 'system';
+  }
+}
+function setTheme(t) {
+  try {
+    localStorage.setItem(THEME_KEY, t);
+  } catch {
+    /* ignore */
+  }
+  if (t === 'system') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+  document.dispatchEvent(new CustomEvent('themechange'));
+}
+
 // ---------- helpers ----------
 
 const $ = (sel) => document.querySelector(sel);
@@ -296,6 +317,14 @@ function renderSettings() {
       </ul>
     </div>
     <div class="card">
+      <h3>Appearance</h3>
+      <div class="segmented" role="radiogroup" aria-label="Theme">
+        ${['system', 'light', 'dark']
+          .map((t) => `<button role="radio" aria-checked="${theme() === t}" class="${theme() === t ? 'on' : ''}" data-action="theme" data-theme="${t}">${t[0].toUpperCase() + t.slice(1)}</button>`)
+          .join('')}
+      </div>
+    </div>
+    <div class="card">
       <h3>Backup</h3>
       <p class="muted small">Your data lives only on this phone. Export a backup now and then (Save to Files / iCloud Drive).</p>
       <div class="btn-row">
@@ -423,6 +452,9 @@ document.querySelector('main').addEventListener('click', async (ev) => {
     recovered = false;
     commit();
     toast('All data erased');
+  } else if (a === 'theme') {
+    setTheme(b.dataset.theme);
+    render();
   } else if (a === 'time') {
     const ms = b.dataset.ms;
     try {
